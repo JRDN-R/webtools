@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>Building a o3 Powered Google Voice SMS Assistant</title>
+
+  <!-- OpenAI Sans font via CDN -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/JRDN-R/webtools@main/openai-font-webkit/stylesheet.css">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Mono:wght@400;500;700&display=swap">
+  <!-- Bootstrap 5.3 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Google Material Symbols (Outlined) -->
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <style>
+    .material-symbols-outlined {
+      font-variation-settings:
+        'FILL' 0,
+        'wght' 400,
+        'GRAD' 0,
+        'opsz' 24;
+      vertical-align: -3px; /* aligns icon with text nicely */
+    }
+  </style>
+</head>
+<body class="text-light" style="background-color: #212121;">
+  <div class="container">
+    <!-- ─────────────── Read‑along player ─────────────── -->
+    <button id="readBtn"
+            class="btn btn-outline-light mb-3"
+            aria-label="Play / pause narration">
+      <span class="material-symbols-outlined">play_arrow</span>
+    </button>
+
+    <audio id="readAudio" preload="metadata" crossorigin="anonymous">
+      <source src="https://raw.githubusercontent.com/JRDN-R/webtools/main/reader-chunks/reader.mp3"
+              type="audio/mpeg">
+    </audio>
+
+    <style>
+      /* paragraph highlighting while it is being narrated */
+      .reading-now { background:#444; transition:background-color .15s; }
+    </style>
+    <!-- ──────────────────────────────────────────────── -->
+    <h1>Building a (GPT)o3 Powered Google Voice SMS Assistant</h1>
+    <h2>Overview</h2>
+    <p class="small fst-italic mb-2" style="font-family:'OpenAI Sans', sans-serif;">by Jordan R.</p>
+    <p>
+      In this guide, we will build a system that connects Google Voice SMS with OpenAI's o3 (via API) to automatically generate witty, sarcastic replies in a family group chat. The system architecture involves several components working together in real-time:<br><br>
+      <b>Google Voice Monitor (WebExtension):</b> A browser extension watches a Google Voice message thread for specific trigger keywords (like "GPT" or "AI") and captures new incoming messages.<br>
+      <b>WebSocket Connection:</b> The extension sends the message data via a WebSocket to a backend server for processing.<br>
+      <b>Backend AI Server (Python):</b> A Python server (e.g., using Flask or FastAPI) receives the message. It uses a local Hugging Face DistilGPT-2 model to preprocess or generate context for the prompt, and it incorporates relevant RAG (Retrieval-Augmented Generation) context (family details) from a vector database. It then calls the OpenAI o3 API with a crafted prompt (including a system instruction for humor style and any retrieved context).<br>
+      <b>OpenAI o3 Response:</b> o3 returns a chat completion with the humorous, sarcastic reply.<br>
+      <b>Returning the Reply:</b> The backend sends the o3 reply back through the WebSocket. The browser extension receives it and inserts the text into the Google Voice chat input, sending the message to the family group.<br>
+      We will break down the setup step-by-step with code snippets and configuration details.
+    </p>
+    <h2>1. Real-Time Google Voice Message Monitoring</h2>
+    <p>
+      <b>Challenge:</b> Google Voice does not provide an official public API for SMS<br>
+      <a href="https://support.google.com" target="_blank">support.google.com</a>
+      , so we need to rely on automation. We use a browser extension to monitor the Google Voice web interface for new messages.
+    </p>
+    <h3>1.1 Browser Extension Setup</h3>
+    <p>
+      We create a Chrome/Firefox WebExtension that runs a content script on the Google Voice web app (e.g., <code>https://voice.google.com</code>) to detect incoming messages and trigger our AI pipeline.<br>
+      <b>Manifest (manifest.json):</b> This configures the extension to run on Google Voice pages and use necessary permissions (like messaging and potentially clipboard if needed). For example:
+    </p>
+    <!-- Manifest JSON snippet -->
+    <section class="mb-5">
+      <div class="text-light p-3 rounded-3 overflow-auto font-monospace mb-0" style="background-color: #000000;">
+        <code class="text-success">{
+  "manifest_version": 3,
+  "name": "GV GPT Assistant",
+  "version": "1.0",
+  "permissions": ["scripting","tabs","webRequest","webRequestBlocking","storage"],
+  "content_scripts": [{"matches":["https://voice.google.com/*"],"js":["contentScript.js"]}],
+  "host_permissions": ["https://your-server-domain.com/*"]
+}</code>
+      </div>
+    </section>
+    <p>
+      In the above, replace <code>"https://your-server-domain.com/*"</code> with the domain where your backend will be accessible (we'll use Cloudflare Tunnel for this). The extension will inject <code>contentScript.js</code> into Google Voice pages.<br>
+      <b>Content Script (contentScript.js):</b> This script will connect to the WebSocket server and listen for new messages on the page:
+    </p>
+    <!-- Content Script snippet -->
+    <section class="mb-5">
+      <div class="text-light p-3 rounded-3 overflow-auto font-monospace mb-0" style="background-color: #000000;">
+        <code class="text-success">// Connect to the WebSocket backend
+const socket = new WebSocket("wss://your-server-domain.com/ws");
+// Example: on successful connection, identify the thread
+socket.onopen = () => { console.log("WebSocket connected"); };
+
+// Listen for messages (AI responses)
+socket.onmessage = (event) => {
+  const replyText = event.data;
+  console.log("AI reply received:", replyText);
+  const inputBox = document.querySelector("textarea");
+  if (inputBox) {
+    inputBox.value = replyText;
+    inputBox.dispatchEvent(new Event('input', { bubbles: true }));
+    const sendButton = document.querySelector("button.send");
+    if (sendButton) sendButton.click();
+  }
+};
+
+// Monitor new messages in the chat
+const chatContainer = document.querySelector(".conversation-container");
+if (chatContainer) {
+  const observer = new MutationObserver(mutations => {
+    mutations.forEach(mutation => {
+      mutation.addedNodes.forEach(node => {
+        if (node.nodeType === 1) {
+          const textElem = node.querySelector(".message-text");
+          const senderElem = node.querySelector(".sender-name");
+          if (textElem && senderElem) {
+            const text = textElem.innerText;
+            if (/\b(?:GPT|AI)\b/i.test(text)) {
+              socket.send(JSON.stringify({ sender: senderElem.innerText, text }));
+            }
+          }
+        }
+      });
+    });
+  });
+  observer.observe(chatContainer, { childList: true, subtree: true });
+}</code>
+      </div>
+    </section>
+    <div class="small"><b>Notes:</b><br>
+      You will need to adjust the selectors (<code>.conversation-container</code>, <code>.message-text</code>, <code>.sender-name</code>, etc.) to match the actual Google Voice DOM. Using your browser's developer tools to inspect the Google Voice page will help identify the correct elements. Google Voice’s web UI dynamically updates when new messages arrive (likely via AJAX or websockets), so a MutationObserver is used to catch new message nodes added to the DOM.<br>
+      We check the message text for the trigger keywords "GPT" or "AI" (as whole words). When detected, we send the message (and sender info) to the backend via WebSocket.<br>
+      The extension listens for a reply from the backend. When the AI's reply comes in, the script inserts it into the text input field and programmatically clicks the send button to send the SMS.<br>
+      By using Cloudflare Tunnel (explained later) to expose our local server at your-server-domain.com, the extension can connect via secure WebSocket (wss://). This avoids any direct local host calls and works even if your machine is behind NAT, because Cloudflare Tunnel will forward the traffic<br>
+      <a href="https://lmei88.medium.com" target="_blank">lmei88.medium.com</a><br>
+      <a href="https://lmei88.medium.com" target="_blank">lmei88.medium.com</a>
+    </div>
+
+    <h2>2. Backend AI Server Setup (Python)</h2>
+    <p>
+      Next, we set up the backend server that will handle incoming WebSocket messages from the extension, process them through our AI pipeline, and send back responses. We can use Python Flask with the Flask-SocketIO extension, or FastAPI (with Starlette websockets). In this guide, we'll demonstrate using Flask with Flask-SocketIO for simplicity. (You can choose FastAPI for an async approach as well; the overall logic is similar.)<br>
+      First, install required Python packages:
+    </p>
+    <!-- Python install snippet -->
+    <section class="mb-5">
+      <div class="text-light p-3 rounded-3 overflow-auto font-monospace mb-0" style="background-color: #000000;">
+        <code class="text-success">pip install flask flask-socketio eventlet transformers sentence-transformers openai</code>
+      </div>
+    </section>
+
+    <ul>
+      <li><b>flask</b> and <b>flask-socketio</b> for the web server and websocket handling.</li>
+      <li><b>eventlet (or gevent)</b> to allow Flask-SocketIO to run in async mode for websockets.</li>
+      <li><b>transformers</b> (Hugging Face) for the local GPT-2 model.</li>
+      <li><b>sentence-transformers</b> for embedding texts for the vector database (if using a pre-trained embedding model for RAG).</li>
+      <li><b>openai</b> for OpenAI API calls.</li>
+    </ul>
+
+    <h3>2.1 Initializing the Flask SocketIO Server</h3>
+    <p>
+      Below is a basic Flask server that accepts WebSocket connections and handles incoming messages from the extension:
+    </p>
+    <!-- Flask server snippet -->
+    <section class="mb-5">
+      <div class="text-light p-3 rounded-3 overflow-auto font-monospace mb-0" style="background-color: #000000;">
+        <code class="text-success">from flask import Flask, request
+from flask_socketio import SocketIO, emit
+import openai
+from transformers import pipeline
+from sentence_transformers import SentenceTransformer
+import numpy as np
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'your-secret-key'
+socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*")
+openai.api_key = "YOUR_OPENAI_API_KEY"
+gpt2_pipeline = pipeline('text-generation', model='distilgpt2')
+embedder = SentenceTransformer('all-MiniLM-L6-v2')
+# ...initialize family_knowledge and embeddings...
+
+@socketio.on('message')
+def handle_message(data):
+    # parse, RAG retrieval, prompt construction...
+    socketio.emit('message', reply_text)
+
+if __name__ == '__main__':
+    socketio.run(app, host='0.0.0.0', port=5000)</code>
+      </div>
+    </section>
+    <b>Let’s break down what this server code does:</b>
+    <ul>
+      <li>Initializes Flask and Flask-SocketIO to handle WebSocket connections. CORS is allowed for all origins for simplicity (in production, you might restrict to your domain).</li>
+      <li>Sets up the OpenAI API key (make sure to secure your key, e.g., load from environment variable instead of hardcoding).</li>
+      <li>Loads the Hugging Face DistilGPT2 model using the Transformers pipeline. DistilGPT2 is a smaller, distilled version of GPT-2 that is faster to run locally<br>
+        <a href="https://huggingface.co" target="_blank">huggingface.co</a>. We use the text-generation pipeline to generate text. This might be used to expand or refine the prompt context.</li>
+      <li>Loads a SentenceTransformer model (here all-MiniLM-L6-v2, a lightweight embedding model) to embed text for semantic search. We create a simple knowledge base of family members with a brief description of each. We embed each info text and store the embeddings.</li>
+      <li>When a WebSocket client connects, we log it (you can handle authentication here if needed).</li>
+      <li>When a message is received via WebSocket (handle_message):
+        <ul>
+          <li>We parse the incoming JSON (containing sender and text).</li>
+          <li>We double-check the trigger condition (ensuring the text contains "gpt" or "ai" – the extension already filters this, but this is a safeguard).</li>
+          <li><b>GPT-2 Processing:</b> (Optional) We pass the user text to the GPT-2 pipeline to generate some additional context or a prompt continuation. This is optional and experimental – one might use it to guess the user's intent or add a witty intermediate phrase. In practice, GPT-2 may not be very coherent for long texts, so this could be replaced or fine-tuned. (If it fails or isn't needed, we handle exceptions and proceed with no addition.)</li>
+          <li><b>RAG Retrieval:</b> We embed the user's message and compute cosine similarity with our stored family info embeddings to find if any known family member or context is relevant<br>
+            <a href="https://help.openai.com" target="_blank">help.openai.com</a>. If the top match is above a threshold (0.5 in this example), we include that info as retrieved_info. For example, if the user message said something about a cat and we know Bob has two cats, the system might pull in Bob's info. This external context injection is a form of Retrieval-Augmented Generation (RAG), which can improve the model's accuracy by injecting relevant knowledge into the prompt<br>
+            <a href="https://help.openai.com" target="_blank">help.openai.com</a> <a href="https://help.openai.com" target="_blank">help.openai.com</a>.
+          </li>
+          <li><b>Prompt Construction:</b> We create a system message that instructs the assistant to be witty and sarcastic, in the style of Nate Bargatze and Shane Gillis. We ensure the assistant addresses people by name and uses humor. If we retrieved contextual info about the family, we append that to the system message as "Relevant context: ...". If GPT-2 provided any useful prompt addition, we include that as a "background hint" (this could help guide o3's response style or content). Then the user's message (the actual text from the group chat) is added as the user role content.</li>
+          <li><b>OpenAI API Call:</b> We call openai.ChatCompletion.create with the o3.5-turbo model (you can use text-davinci-003 or others, but the ChatCompletion with o3.5/4 is suited for conversational replies). We pass the messages array, set a temperature for creativity, and limit max_tokens for the response length. The system will then generate a completion. If the API call succeeds, we extract the reply text. In our scenario, the reply will likely already contain the humorous tone and possibly address the sender by name (since we asked it to do so in the prompt).</li>
+          <li><b>Send back reply:</b> We use <code>socketio.emit('message', reply_text)</code> to send the generated reply back to the connected client. The content script will receive this in its <code>socket.onmessage</code> handler and then input it into Google Voice UI.</li>
+        </ul>
+      </li>
+    </ul>
+    <blockquote>
+      Note: The system prompt also mentions "If sources are provided, list them at the end." This could be an instruction if we had a mechanism to provide sources (for example, if we did a web search and had source URLs). In our current code, we didn't implement a web search tool, but you could extend the pipeline to do so. For example, you might integrate another API call (like to a Bing Web Search API) if the user asks a factual question, and then include the result with citations in the prompt. This would make the assistant list sources in its answer. Such an extension would follow the same RAG principle by retrieving info and appending it to the prompt, and instructing o3 to format the answer with citations.
+    </blockquote>
+    <h3>2.2 Cloudflare Tunnel for Exposing the Server</h3>
+    <p>
+      To allow the browser extension (which runs on your local machine with Google Voice open) to reach the Flask server, we can use Cloudflare Tunnel. Cloudflare Tunnel (formerly Argo Tunnel) lets you expose a local server to the internet securely without opening ports<br>
+      <a href="https://lmei88.medium.com" target="_blank">lmei88.medium.com</a>.
+      It supports WebSocket traffic seamlessly (no extra config needed for WS to pass through)<br>
+      <a href="https://lmei88.medium.com" target="_blank">lmei88.medium.com</a>.
+    </p>
+    <p>
+      Steps to set up the tunnel (assuming you have a Cloudflare account and Cloudflare's cloudflared installed):<br>
+      Authenticate cloudflared with your Cloudflare account (<code>cloudflared login</code>).<br>
+      Create a tunnel and map it to your local server port (e.g., 5000). For example:
+    </p>
+    <!-- Tunnel create snippet -->
+    <section class="mb-5">
+      <div class="text-light p-3 rounded-3 overflow-auto font-monospace mb-0" style="background-color: #000000;">
+        <code class="text-success">cloudflared tunnel create my-gpt-bot-tunnel
+cloudflared tunnel route dns my-gpt-bot-tunnel your-server-domain.com</code>
+      </div>
+    </section>
+    <p>In your <code>config.yml</code> for the tunnel, specify:</p>
+    <!-- Tunnel ingress snippet -->
+    <section class="mb-5">
+      <div class="text-light p-3 rounded-3 overflow-auto font-monospace mb-0" style="background-color: #000000;">
+        <code class="text-success">ingress:
+hostname: your-server-domain.com service: http://localhost:5000
+service: http_status:404</code>
+      </div>
+    </section>
+    <p>Then run the tunnel:</p>
+    <!-- Tunnel run snippet -->
+    <section class="mb-5">
+      <div class="text-light p-3 rounded-3 overflow-auto font-monospace mb-0" style="background-color: #000000;">
+        <code class="text-success">cloudflared tunnel run my-gpt-bot-tunnel</code>
+      </div>
+    </section>
+    <p>
+      This will connect and provide a public URL (your custom domain or a generated one) that maps to your local Flask server. The WebSocket traffic will be forwarded to Flask just like HTTP.<br>
+      In the extension code, ensure you use <code>wss://your-server-domain.com</code> (Cloudflare will provide TLS, and WebSocket upgrades are supported). Make sure your Cloudflare zone has "WebSockets" enabled (it’s on by default for most).<br>
+      Test the connection by navigating your browser to the Cloudflare URL (it should show your Flask app if you have any HTTP route, or you can test the socket via a WebSocket client).<br>
+      Cloudflare Tunnel removes the need to deploy the server on an external host — you can run it locally and still have it accessible. If you prefer not to run a local server at all times, you could deploy the above Flask app to a cloud host or use a service like Google Cloud Run or Heroku (ensuring WebSocket support is enabled). But in our scenario, using the tunnel is convenient and secure (no open ports, and you can add Cloudflare Access policies if needed for authentication).
+    </p>
+    <h2>3. Running the System</h2>
+    <ol>
+      <li><b>Start the backend server:</b> Run the Flask app (for Flask-SocketIO, use <code>socketio.run(app, host="0.0.0.0", port=5000)</code> or similar in your main block). Ensure it starts without errors and loads the models. (The first time, Hugging Face will download the distilgpt2 model ~300MB and the sentence-transformer model.)</li>
+      <li><b>Start Cloudflare Tunnel:</b> As set up above, start the tunnel so that your server is accessible at the configured domain. Verify the tunnel is up.</li>
+      <li><b>Load the extension:</b> Install the browser extension in your browser (in Chrome, enable Developer Mode and "Load unpacked" extension pointing to your extension folder with the manifest). Navigate to Google Voice (<code>https://voice.google.com</code>) and open the family group SMS thread.</li>
+      <li><b>Initiate WebSocket:</b> The content script will automatically attempt to connect to the WebSocket (onopen will log if successful). Check the browser console for "WebSocket connected".</li>
+      <li><b>Test it:</b> In the group chat, send a message containing "GPT" or "AI" (for example, someone in the family types: "Hey GPT, tell me a joke about our family."). The extension should detect the trigger, send the message to the server, and you should see logs in the Flask server indicating a message was received.</li>
+      <li><b>AI Responds:</b> After a short moment (depending on response time of o3), the server will emit the reply. The extension will receive it and insert it into the chat. Everyone in the group will see the AI's witty, sarcastic reply addressed to the person. For example, the reply might look like: <i>"Alright Alice, you want a joke? Fine... You know the family’s gone high-tech when even the toaster complains about dad’s singing. 😜"</i> (plus any humorous twist).</li>
+    </ol>
+    <p>
+      The entire round-trip should only take a couple of seconds in practice. Most latency comes from the OpenAI API call. Using the local GPT-2 is fast (milliseconds) and the embedding lookup is also quick.<br>
+      There is effectively no heavy workload on the user’s device beyond running the lightweight extension and the Flask server. The AI heavy-lifting happens on OpenAI’s side (o3 API) and the small HuggingFace model locally which is manageable. Cloudflare Tunnel and the extension handle the data plumbing without exposing your local network publicly (Cloudflare acts as a secure middleman).
+    </p>
+    <h2>4. Additional Considerations (Authentication &amp; Frameworks)</h2>
+    <ul>
+      <li><b>Authentication:</b> Google Voice is tied to your Google Account, but since we’re interacting with it via the logged-in web session, the extension leverages your existing login. No Google API tokens are used (and indeed Google Voice has no official API)<br>
+        <a href="https://support.google.com" target="_blank">support.google.com</a>. Ensure you keep your OpenAI API key safe; don't expose it in client-side code. The Flask server is the only place it’s used. If you want to restrict who can connect to your Flask WebSocket (since our Cloudflare Tunnel currently allows anyone), you could implement a simple auth token check in the handshake (e.g., the extension and server share a secret). Alternatively, Cloudflare Access could require a login to reach the WebSocket URL (though that might complicate the extension connection; one approach is to set the tunnel to bypass Access for this specific application for simplicity<br>
+        <a href="https://lmei88.medium.com" target="_blank">lmei88.medium.com</a>).</li>
+      <li><b>Choosing the Best Framework:</b> You asked which framework is best for this setup. In our solution, we used Flask for demonstration. Flask with Flask-SocketIO works, but for heavy asynchronous communication and scale, FastAPI (with its native WebSocket support and async capabilities) could be a better choice. FastAPI would allow an <code>async def websocket_endpoint()</code> that can await the OpenAI API call without blocking other connections. If sticking with Flask, using eventlet or gevent (as Flask-SocketIO does under the hood) is fine for a small-scale project. For orchestrating the AI pipeline (combining local models, vector search, and remote API), a framework like LangChain can be very helpful. LangChain provides abstractions to manage multi-step AI workflows, including calling Hugging Face models locally and the OpenAI API, and doing retrieval from vector stores, all in a coherent chain. Our manual implementation could be refactored using LangChain's primitives (e.g., a retrieval QA chain with a vector store, or using a HuggingFace LLM class) to simplify the code. This isn't required, but it's an option if you expand the project. The concept of retrieval-augmented generation (RAG) we used is well-supported by such frameworks<br>
+        <a href="https://help.openai.com" target="_blank">help.openai.com</a>.
+      </li>
+      <li>If deploying on Google Cloud, you might consider Cloud Run or Cloud Functions for the Python service (though Cloud Functions may not support persistent WebSocket, Cloud Run does). You would still need a way to get messages from Google Voice. Since Google Voice has no direct API, the browser extension approach (or an automated headless browser) is the way to go. Alternatively, other SMS services (Twilio, etc.) provide webhooks that could eliminate the need for an extension entirely, but that means using a different phone number. Given the requirement to use your actual Google Voice number in the family chat, our extension+websocket approach is a viable workaround.</li>
+    </ul>
+    <h2>5. Conclusion</h2>
+    <p>
+      We have set up a comprehensive system where a browser extension listens to a Google Voice chat and triggers an AI response pipeline. The pipeline uses a local DistilGPT2 model for quick prompt brainstorming and a vector database of family info for context, then leverages OpenAI's o3.5 to craft a humorous response with the desired style. The response is sent back and posted in the chat, all in real-time.
+    </p>
+    <p>This architecture showcases how you can integrate modern AI models into everyday communications:
+      <ul>
+        <li>WebExtensions &amp; WebSockets for real-time integration with web apps (in lieu of official APIs).</li>
+        <li>Local NLP models for on-premise quick tasks.</li>
+        <li>Retrieval-Augmented Generation (RAG) for injecting personalized context<br>
+          <a href="https://help.openai.com" target="_blank">help.openai.com</a>.
+        </li>
+        <li>Cloud services (OpenAI API for heavy NLP, Cloudflare for networking) to handle the expensive or complex parts of the workflow.</li>
+      </ul>
+    </p>
+    <p>
+      By choosing a solid web framework (Flask-SocketIO for simplicity, or FastAPI for performance) and possibly leveraging frameworks like LangChain for AI orchestration, you can create a robust, extensible AI assistant. In our case, we've focused on a fun use-case: a witty family chatbot that responds with sarcasm and humor on demand. Enjoy your new AI family member!
+    </p>
+    <h3>Sources:</h3>
+    <ul>
+      <li>
+        <a href="https://support.google.com/voice/thread/248102131/google-voice-api?hl=en#:~:text=Google%20Voice%20API%20No%2C%20there,Google%20Voice%20Acceptable%20Use%20Policy" target="_blank">Google Voice API availability – Google Support Forums</a>
+        <br>
+        No, there is no official Google Voice API, and any kind of automation would violate Google Voice’s Acceptable Use Policy.
+      </li>
+      <li>
+        <a href="https://lmei88.medium.com/websocket-with-cloudflare-tunnel-reversed-proxy-to-self-hosted-ubuntu-server-95625475c610#:~:text=It%20is%20a%20means%20of,users%20reverse%20proxied%20by%20Cloudflare" target="_blank">Cloudflare Tunnel and WebSocket support – Medium (lmei)</a>
+        <br>
+        Explains how to use Cloudflare Tunnel for NAT traversal, allowing you to connect a local server to the internet without a public IP. Traffic goes through Cloudflare and is reverse proxied to your server.
+      </li>
+      <li>
+        <a href="https://lmei88.medium.com/websocket-with-cloudflare-tunnel-reversed-proxy-to-self-hosted-ubuntu-server-95625475c610#:~:text=,rule" target="_blank">Cloudflare Tunnel Ingress Rule Example – Medium (lmei)</a>
+        <br>
+        Describes the “Tunnel ingress rule” method for configuring Cloudflare Tunnel for WebSocket connections.
+      </li>
+      <li>
+        <a href="https://lmei88.medium.com/websocket-with-cloudflare-tunnel-reversed-proxy-to-self-hosted-ubuntu-server-95625475c610#:~:text=reverse%20proxied%20by%20Cloudflare" target="_blank">Cloudflare Tunnel Proxy Behavior – Medium (lmei)</a>
+        <br>
+        Short excerpt about the traffic being reverse proxied by Cloudflare.
+      </li>
+      <li>
+        <a href="https://lmei88.medium.com/websocket-with-cloudflare-tunnel-reversed-proxy-to-self-hosted-ubuntu-server-95625475c610#:~:text=,%E2%86%92%20mydomain%20%E2%86%92%20Network" target="_blank">Cloudflare Tunnel WebSocket Setting – Medium (lmei)</a>
+        <br>
+        How to enable WebSocket support under Cloudflare’s dashboard for your domain.
+      </li>
+      <li>
+        <a href="https://huggingface.co/distilbert/distilgpt2#:~:text=Using%20DistilGPT2%20is%20similar%20to,set%20a%20seed%20for%20reproducibility" target="_blank">DistilGPT2 Model Card – Hugging Face</a>
+        <br>
+        Official Hugging Face model card for DistilGPT2, a distilled (smaller, faster) version of GPT-2 for text generation.
+      </li>
+      <li>
+        <a href="https://help.openai.com/en/articles/8868588-retrieval-augmented-generation-rag-and-semantic-search-for-gpts#:~:text=This%20is%20done%20using%20a,the%20most%20relevant%20text%20chunks" target="_blank">Retrieval Augmented Generation (RAG) and Semantic Search for GPTs – OpenAI Help Center (Vector DB explanation)</a>
+        <br>
+        Explains how RAG uses a vector database to find and retrieve the most relevant text chunks for a user’s query.
+      </li>
+      <li>
+        <a href="https://help.openai.com/en/articles/8868588-retrieval-augmented-generation-rag-and-semantic-search-for-gpts#:~:text=Retrieval%20Augmented%20Generation%20,aware%20response" target="_blank">Retrieval Augmented Generation (RAG) External Context – OpenAI Help Center</a>
+        <br>
+        Further explains how RAG injects external context into prompts at runtime, enhancing the accuracy and context of GPT’s responses.
+      </li>
+      <li>
+        <a href="https://help.openai.com/en/articles/8868588-retrieval-augmented-generation-rag-and-semantic-search-for-gpts#:~:text=1,paragraphs%20or%20logical%20blocks" target="_blank">Retrieval Augmented Generation (RAG) Chunking – OpenAI Help Center</a>
+        <br>
+        Describes how files are chunked into smaller sections (paragraphs or logical blocks) for semantic search and retrieval in OpenAI’s RAG process.
+      </li>
+    </ul>
+  </div>
+  <script>
+  // Page is static, only Bootstrap/JS for nav/UX would go here if required.
+  </script>
+<script> // Page is static, only Bootstrap/JS for nav/UX would go here if required. </script>
+<!-- Bootstrap 5.3 JS (includes Popper) -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+</body>
+<script>
+(() => {
+  const audio = document.getElementById('readAudio');
+  const btn   = document.getElementById('readBtn');
+  let   track, active = null;
+
+  /* step 1: fetch and load cues */
+  fetch('https://raw.githubusercontent.com/JRDN-R/webtools/main/reader-chunks/cues.vtt')
+    .then(r => r.text())
+    .then(parseVTT)
+    .then(cues => {
+      track = audio.addTextTrack('metadata', 'Sync');
+      track.mode = 'hidden';
+      cues.forEach(c => track.addCue(new VTTCue(c.start, c.end, c.text)));
+      track.addEventListener('cuechange', () => {
+        const cue = track.activeCues[0];
+        if (cue) highlightCue(cue.text);
+      });
+    })
+    .catch(err => console.error('Failed to load cues:', err));
+
+  /* helper: parse WebVTT (very simple, assumes “start --> end” then one‑line text) */
+  function parseVTT(raw) {
+    return raw
+      .split(/\r?\n\r?\n/)                 // split into cue blocks
+      .map(block => {
+        const [time, text] = block.trim().split(/\r?\n/);
+        if (!time || !text || !time.includes('-->')) return null;
+        const [s, e] = time.split('-->').map(t => toSec(t.trim()));
+        return { start: s, end: e, text: text.trim() };
+      })
+      .filter(Boolean);
+  }
+  function toSec(t) {                     // HH:MM:SS.mmm → seconds
+    const [h, m, rest] = t.split(':');
+    const [s, ms='0']  = rest.split('.');
+    return (+h)*3600 + (+m)*60 + (+s) + (+ms)/1000;
+  }
+
+  /* helper: highlight element whose text roughly starts with cue text */
+  function highlightCue(cueText) {
+    const norm = s => s.replace(/\s+/g,' ').trim().toLowerCase();
+    const cueNorm = norm(cueText);
+    const selector = '.container h1, .container h2, .container h3, .container p, .container li';
+    const next = [...document.querySelectorAll(selector)]
+                 .find(el => norm(el.innerText).startsWith(cueNorm));
+    if (active) active.classList.remove('reading-now');
+    if (next)   next.classList.add('reading-now'), active = next;
+  }
+
+  /* play / pause button */
+  btn.addEventListener('click', () => { audio.paused ? audio.play() : audio.pause(); });
+  audio.addEventListener('play',  () => { btn.innerHTML = '<span class="material-symbols-outlined">pause</span>'; });
+  audio.addEventListener('pause', () => { btn.innerHTML = '<span class="material-symbols-outlined">play_arrow</span>'; });
+
+})();
+</script>
+</html>

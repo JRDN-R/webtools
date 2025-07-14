@@ -1,0 +1,223 @@
+WEBVTT
+
+00:00:00.000 --> 00:00:04.153
+Building a (GPT)o3 Powered Google Voice SMS Assistant
+
+00:00:04.153 --> 00:00:04.859
+Overview
+
+00:00:04.859 --> 00:00:19.226
+In this guide, we will build a system that connects Google Voice SMS with OpenAI's o3 (via API) to automatically generate witty, sarcastic replies in a family group chat. The system architecture involves several components working together in real-time:
+
+00:00:19.226 --> 00:00:30.903
+Google Voice Monitor (WebExtension): A browser extension watches a Google Voice message thread for specific trigger keywords (like GPT or AI) and captures new incoming messages.
+
+00:00:30.903 --> 00:00:36.780
+WebSocket Connection: The extension sends the message data via a WebSocket to a backend server for processing.
+
+00:00:36.780 --> 00:01:07.317
+Backend AI Server (Python): A Python server (e.g., using Flask or FastAPI) receives the message. It uses a local Hugging Face DistilGPT-2 model to preprocess or generate context for the prompt, and it incorporates relevant RAG (Retrieval-Augmented Generation) context (family details) from a vector database. It then calls the OpenAI o3 API with a crafted prompt (including a system instruction for humor style and any retrieved context).
+
+00:01:07.317 --> 00:01:13.508
+OpenAI o3 Response: o3 returns a chat completion with the humorous, sarcastic reply.
+
+00:01:13.508 --> 00:01:24.715
+Returning the Reply: The backend sends the o3 reply back through the WebSocket. The browser extension receives it and inserts the text into the Google Voice chat input, sending the message to the family group.
+
+00:01:24.715 --> 00:01:29.756
+We will break down the setup step-by-step with code snippets and configuration details.
+
+00:01:29.756 --> 00:01:33.570
+1. Real-Time Google Voice Message Monitoring
+
+00:01:33.570 --> 00:01:38.194
+Challenge: Google Voice does not provide an official public API for SMS
+
+00:01:38.194 --> 00:01:46.997
+support.google.com , so we need to rely on automation. We use a browser extension to monitor the Google Voice web interface for new messages.
+
+00:01:46.997 --> 00:01:49.191
+1.1 Browser Extension Setup
+
+00:01:49.191 --> 00:02:03.010
+We create a Chrome/Firefox WebExtension that runs a content script on the Google Voice web app (e.g., https://voice.google.com) to detect incoming messages and trigger our AI pipeline.
+
+00:02:03.010 --> 00:02:14.164
+Manifest (manifest.json): This configures the extension to run on Google Voice pages and use necessary permissions (like messaging and potentially clipboard if needed).
+
+00:02:14.164 --> 00:02:17.900
+2. Backend AI Server Setup (Python)
+
+00:02:17.900 --> 00:02:43.500
+Next, we set up the backend server that will handle incoming WebSocket messages from the extension, process them through our AI pipeline, and send back responses. We can use Python Flask with the Flask-SocketIO extension, or FastAPI (with Starlette websockets). In this guide, we'll demonstrate using Flask with Flask-SocketIO for simplicity. (You can choose FastAPI for an async approach as well; the overall logic is similar.)
+
+00:02:43.500 --> 00:02:46.870
+First, install required Python packages
+
+00:02:46.870 --> 00:02:50.840
+2.1 Initializing the Flask SocketIO Server
+
+00:02:50.840 --> 00:02:56.901
+Below is a basic Flask server that accepts WebSocket connections and handles incoming messages from the extension
+
+00:02:56.901 --> 00:02:59.016
+Let’s break down what this server code does:
+
+00:02:59.016 --> 00:03:09.936
+Initializes Flask and Flask-SocketIO to handle WebSocket connections. CORS is allowed for all origins for simplicity (in production, you might restrict to your domain).
+
+00:03:09.936 --> 00:03:17.720
+Sets up the OpenAI API key (make sure to secure your key, e.g., load from environment variable instead of hardcoding).
+
+00:03:17.720 --> 00:03:29.214
+Loads the Hugging Face DistilGPT2 model using the Transformers pipeline. DistilGPT2 is a smaller, distilled version of GPT-2 that is faster to run locally
+
+00:03:29.214 --> 00:03:37.782
+huggingface.co. We use the text-generation pipeline to generate text. This might be used to expand or refine the prompt context.
+
+00:03:37.782 --> 00:03:52.750
+Loads a SentenceTransformer model (here all-MiniLM-L6-v2, a lightweight embedding model) to embed text for semantic search. We create a simple knowledge base of family members with a brief description of each. We embed each info text and store the embeddings.
+
+00:03:52.750 --> 00:03:57.374
+When a WebSocket client connects, we log it (you can handle authentication here if needed).
+
+00:03:57.374 --> 00:04:00.926
+When a message is received via WebSocket (handle_message):
+
+00:04:00.926 --> 00:04:04.296
+We parse the incoming JSON (containing sender and text).
+
+00:04:04.296 --> 00:04:13.544
+We double-check the trigger condition (ensuring the text contains gpt or ai – the extension already filters this, but this is a safeguard).
+
+00:04:13.544 --> 00:04:40.032
+GPT-2 Processing: (Optional) We pass the user text to the GPT-2 pipeline to generate some additional context or a prompt continuation. This is optional and experimental – one might use it to guess the user's intent or add a witty intermediate phrase. In practice, GPT-2 may not be very coherent for long texts, so this could be replaced or fine-tuned. (If it fails or isn't needed, we handle exceptions and proceed with no addition.)
+
+00:04:40.032 --> 00:04:49.619
+RAG Retrieval: We embed the user's message and compute cosine similarity with our stored family info embeddings to find if any known family member or context is relevant
+
+00:04:49.619 --> 00:05:15.637
+help.openai.com. If the top match is above a threshold (0.5 in this example), we include that info as retrieved_info. For example, if the user message said something about a cat and we know Bob has two cats, the system might pull in Bob's info. This external context injection is a form of Retrieval-Augmented Generation (RAG), which can improve the model's accuracy by injecting relevant knowledge into the prompt
+
+00:05:15.637 --> 00:05:19.320
+help.openai.com help.openai.com.
+
+00:05:19.320 --> 00:05:52.600
+Prompt Construction: We create a system message that instructs the assistant to be witty and sarcastic, in the style of Nate Bargatze and Shane Gillis. We ensure the assistant addresses people by name and uses humor. If we retrieved contextual info about the family, we append that to the system message as Relevant context: .... If GPT-2 provided any useful prompt addition, we include that as a background hint (this could help guide o3's response style or content). Then the user's message (the actual text from the group chat) is added as the user role content.
+
+00:05:52.600 --> 00:06:31.078
+OpenAI API Call: We call openai.ChatCompletion.create with the o3.5-turbo model (you can use text-davinci-003 or others, but the ChatCompletion with o3.5/4 is suited for conversational replies). We pass the messages array, set a temperature for creativity, and limit max_tokens for the response length. The system will then generate a completion. If the API call succeeds, we extract the reply text. In our scenario, the reply will likely already contain the humorous tone and possibly address the sender by name (since we asked it to do so in the prompt).
+
+00:06:31.078 --> 00:06:44.662
+Send back reply: We use socketio.emit('message', reply_text) to send the generated reply back to the connected client. The content script will receive this in its socket.onmessage handler and then input it into Google Voice UI.
+
+00:06:44.662 --> 00:07:21.599
+Note: The system prompt also mentions If sources are provided, list them at the end. This could be an instruction if we had a mechanism to provide sources (for example, if we did a web search and had source URLs). In our current code, we didn't implement a web search tool, but you could extend the pipeline to do so. For example, you might integrate another API call (like to a Bing Web Search API) if the user asks a factual question, and then include the result with citations in the prompt. This would make the assistant list sources in its answer. Such an extension would follow the same RAG principle by retrieving info and appending it to the prompt, and instructing o3 to format the answer with citations.
+
+00:07:21.599 --> 00:07:24.786
+2.2 Cloudflare Tunnel for Exposing the Server
+
+00:07:24.786 --> 00:07:38.030
+To allow the browser extension (which runs on your local machine with Google Voice open) to reach the Flask server, we can use Cloudflare Tunnel. Cloudflare Tunnel (formerly Argo Tunnel) lets you expose a local server to the internet securely without opening ports
+
+00:07:38.030 --> 00:07:46.232
+lmei88.medium.com. It supports WebSocket traffic seamlessly (no extra config needed for WS to pass through)
+
+00:07:46.232 --> 00:07:48.949
+lmei88.medium.com.
+
+00:07:48.949 --> 00:07:55.062
+Steps to set up the tunnel (assuming you have a Cloudflare account and Cloudflare's cloudflared installed):
+
+00:07:55.062 --> 00:08:00.103
+Authenticate cloudflared with your Cloudflare account (cloudflared login).
+
+00:08:00.103 --> 00:08:04.962
+Create a tunnel and map it to your local server port (e.g., 5000).
+
+00:08:04.962 --> 00:08:16.508
+This will connect and provide a public URL (your custom domain or a generated one) that maps to your local Flask server. The WebSocket traffic will be forwarded to Flask just like HTTP.
+
+00:08:16.508 --> 00:08:31.163
+In the extension code, ensure you use wss://your-server-domain.com (Cloudflare will provide TLS, and WebSocket upgrades are supported). Make sure your Cloudflare zone has WebSockets enabled (it’s on by default for most).
+
+00:08:31.163 --> 00:08:42.604
+Test the connection by navigating your browser to the Cloudflare URL (it should show your Flask app if you have any HTTP route, or you can test the socket via a WebSocket client).
+
+00:08:42.604 --> 00:09:08.152
+Cloudflare Tunnel removes the need to deploy the server on an external host — you can run it locally and still have it accessible. If you prefer not to run a local server at all times, you could deploy the above Flask app to a cloud host or use a service like Google Cloud Run or Heroku (ensuring WebSocket support is enabled). But in our scenario, using the tunnel is convenient and secure (no open ports, and you can add Cloudflare Access policies if needed for authentication).
+
+00:09:08.152 --> 00:09:10.764
+3. Running the System
+
+00:09:10.764 --> 00:09:36.364
+Start the backend server: Run the Flask app (for Flask-SocketIO, use socketio.run(app, host=0.0.0.0, port=5000) or similar in your main block). Ensure it starts without errors and loads the models. (The first time, Hugging Face will download the distilgpt2 model ~300MB and the sentence-transformer model.)
+
+00:09:36.364 --> 00:09:44.149
+Start Cloudflare Tunnel: As set up above, start the tunnel so that your server is accessible at the configured domain. Verify the tunnel is up.
+
+00:09:44.149 --> 00:10:03.218
+Load the extension: Install the browser extension in your browser (in Chrome, enable Developer Mode and Load unpacked extension pointing to your extension folder with the manifest). Navigate to Google Voice (https://voice.google.com) and open the family group SMS thread.
+
+00:10:03.218 --> 00:10:12.883
+Initiate WebSocket: The content script will automatically attempt to connect to the WebSocket (onopen will log if successful). Check the browser console for WebSocket connected.
+
+00:10:12.883 --> 00:10:30.490
+Test it: In the group chat, send a message containing GPT or AI (for example, someone in the family types: Hey GPT, tell me a joke about our family.). The extension should detect the trigger, send the message to the server, and you should see logs in the Flask server indicating a message was received.
+
+00:10:30.490 --> 00:10:57.944
+AI Responds: After a short moment (depending on response time of o3), the server will emit the reply. The extension will receive it and insert it into the chat. Everyone in the group will see the AI's witty, sarcastic reply addressed to the person. For example, the reply might look like: Alright Alice, you want a joke? Fine... You know the family’s gone high-tech when even the toaster complains about dad’s singing. 😜 (plus any humorous twist).
+
+00:10:57.944 --> 00:11:10.457
+The entire round-trip should only take a couple of seconds in practice. Most latency comes from the OpenAI API call. Using the local GPT-2 is fast (milliseconds) and the embedding lookup is also quick.
+
+00:11:10.457 --> 00:11:32.948
+There is effectively no heavy workload on the user’s device beyond running the lightweight extension and the Flask server. The AI heavy-lifting happens on OpenAI’s side (o3 API) and the small HuggingFace model locally which is manageable. Cloudflare Tunnel and the extension handle the data plumbing without exposing your local network publicly (Cloudflare acts as a secure middleman).
+
+00:11:32.948 --> 00:11:37.520
+4. Additional Considerations (Authentication & Frameworks)
+
+00:11:37.520 --> 00:11:52.018
+Authentication: Google Voice is tied to your Google Account, but since we’re interacting with it via the logged-in web session, the extension leverages your existing login. No Google API tokens are used (and indeed Google Voice has no official API)
+
+00:11:52.018 --> 00:12:26.395
+support.google.com. Ensure you keep your OpenAI API key safe; don't expose it in client-side code. The Flask server is the only place it’s used. If you want to restrict who can connect to your Flask WebSocket (since our Cloudflare Tunnel currently allows anyone), you could implement a simple auth token check in the handshake (e.g., the extension and server share a secret). Alternatively, Cloudflare Access could require a login to reach the WebSocket URL (though that might complicate the extension connection; one approach is to set the tunnel to bypass Access for this specific application for simplicity
+
+00:12:26.395 --> 00:12:29.007
+lmei88.medium.com).
+
+00:12:29.007 --> 00:13:42.829
+Choosing the Best Framework: You asked which framework is best for this setup. In our solution, we used Flask for demonstration. Flask with Flask-SocketIO works, but for heavy asynchronous communication and scale, FastAPI (with its native WebSocket support and async capabilities) could be a better choice. FastAPI would allow an async def websocket_endpoint() that can await the OpenAI API call without blocking other connections. If sticking with Flask, using eventlet or gevent (as Flask-SocketIO does under the hood) is fine for a small-scale project. For orchestrating the AI pipeline (combining local models, vector search, and remote API), a framework like LangChain can be very helpful. LangChain provides abstractions to manage multi-step AI workflows, including calling Hugging Face models locally and the OpenAI API, and doing retrieval from vector stores, all in a coherent chain. Our manual implementation could be refactored using LangChain's primitives (e.g., a retrieval QA chain with a vector store, or using a HuggingFace LLM class) to simplify the code. This isn't required, but it's an option if you expand the project. The concept of retrieval-augmented generation (RAG) we used is well-supported by such frameworks
+
+00:13:42.829 --> 00:13:45.258
+help.openai.com.
+
+00:13:45.258 --> 00:14:23.162
+If deploying on Google Cloud, you might consider Cloud Run or Cloud Functions for the Python service (though Cloud Functions may not support persistent WebSocket, Cloud Run does). You would still need a way to get messages from Google Voice. Since Google Voice has no direct API, the browser extension approach (or an automated headless browser) is the way to go. Alternatively, other SMS services (Twilio, etc.) provide webhooks that could eliminate the need for an extension entirely, but that means using a different phone number. Given the requirement to use your actual Google Voice number in the family chat, our extension+websocket approach is a viable workaround.
+
+00:14:23.162 --> 00:14:24.677
+5. Conclusion
+
+00:14:24.677 --> 00:14:49.258
+We have set up a comprehensive system where a browser extension listens to a Google Voice chat and triggers an AI response pipeline. The pipeline uses a local DistilGPT2 model for quick prompt brainstorming and a vector database of family info for context, then leverages OpenAI's o3.5 to craft a humorous response with the desired style. The response is sent back and posted in the chat, all in real-time.
+
+00:14:49.258 --> 00:14:54.901
+This architecture showcases how you can integrate modern AI models into everyday communications:
+
+00:14:54.901 --> 00:15:00.726
+WebExtensions & WebSockets for real-time integration with web apps (in lieu of official APIs).
+
+00:15:00.726 --> 00:15:04.697
+Local NLP models for on-premise quick tasks.
+
+00:15:04.697 --> 00:15:09.999
+Retrieval-Augmented Generation (RAG) for injecting personalized context
+
+00:15:09.999 --> 00:15:13.030
+help.openai.com.
+
+00:15:13.030 --> 00:15:21.232
+Cloud services (OpenAI API for heavy NLP, Cloudflare for networking) to handle the expensive or complex parts of the workflow.
+
+00:15:21.232 --> 00:15:44.977
+By choosing a solid web framework (Flask-SocketIO for simplicity, or FastAPI for performance) and possibly leveraging frameworks like LangChain for AI orchestration, you can create a robust, extensible AI assistant. In our case, we've focused on a fun use-case: a witty family chatbot that responds with sarcasm and humor on demand. Enjoy your new AI family member!

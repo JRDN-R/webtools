@@ -1,0 +1,1 @@
+Send back reply: We use socketio.emit('message', reply_text) to send the generated reply back to the connected client. The content script will receive this in its socket.onmessage handler and then input it into Google Voice UI.

@@ -1,0 +1,1 @@
+Returning the Reply: The backend sends the o3 reply back through the WebSocket. The browser extension receives it and inserts the text into the Google Voice chat input, sending the message to the family group.

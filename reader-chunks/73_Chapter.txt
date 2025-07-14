@@ -1,0 +1,1 @@
+Cloud services (OpenAI API for heavy NLP, Cloudflare for networking) to handle the expensive or complex parts of the workflow.

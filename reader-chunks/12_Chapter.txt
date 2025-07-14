@@ -1,0 +1,1 @@
+support.google.com , so we need to rely on automation. We use a browser extension to monitor the Google Voice web interface for new messages.

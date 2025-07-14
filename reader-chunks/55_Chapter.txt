@@ -1,0 +1,1 @@
+Test it: In the group chat, send a message containing GPT or AI (for example, someone in the family types: Hey GPT, tell me a joke about our family.). The extension should detect the trigger, send the message to the server, and you should see logs in the Flask server indicating a message was received.

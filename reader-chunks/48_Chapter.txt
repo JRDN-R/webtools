@@ -1,0 +1,1 @@
+Test the connection by navigating your browser to the Cloudflare URL (it should show your Flask app if you have any HTTP route, or you can test the socket via a WebSocket client).

@@ -1,0 +1,1 @@
+WebExtensions & WebSockets for real-time integration with web apps (in lieu of official APIs).

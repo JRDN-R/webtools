@@ -1,0 +1,1 @@
+RAG Retrieval: We embed the user's message and compute cosine similarity with our stored family info embeddings to find if any known family member or context is relevant

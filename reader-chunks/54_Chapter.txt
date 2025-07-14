@@ -1,0 +1,1 @@
+Initiate WebSocket: The content script will automatically attempt to connect to the WebSocket (onopen will log if successful). Check the browser console for WebSocket connected.

@@ -1,0 +1,1 @@
+By choosing a solid web framework (Flask-SocketIO for simplicity, or FastAPI for performance) and possibly leveraging frameworks like LangChain for AI orchestration, you can create a robust, extensible AI assistant. In our case, we've focused on a fun use-case: a witty family chatbot that responds with sarcasm and humor on demand. Enjoy your new AI family member!

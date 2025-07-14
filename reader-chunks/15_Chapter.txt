@@ -1,0 +1,1 @@
+Manifest (manifest.json): This configures the extension to run on Google Voice pages and use necessary permissions (like messaging and potentially clipboard if needed).

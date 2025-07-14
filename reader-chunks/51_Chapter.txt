@@ -1,0 +1,1 @@
+Start the backend server: Run the Flask app (for Flask-SocketIO, use socketio.run(app, host=0.0.0.0, port=5000) or similar in your main block). Ensure it starts without errors and loads the models. (The first time, Hugging Face will download the distilgpt2 model ~300MB and the sentence-transformer model.)

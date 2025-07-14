@@ -1,0 +1,1 @@
+Google Voice Monitor (WebExtension): A browser extension watches a Google Voice message thread for specific trigger keywords (like GPT or AI) and captures new incoming messages.

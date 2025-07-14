@@ -1,0 +1,1 @@
+In the extension code, ensure you use wss://your-server-domain.com (Cloudflare will provide TLS, and WebSocket upgrades are supported). Make sure your Cloudflare zone has WebSockets enabled (it’s on by default for most).

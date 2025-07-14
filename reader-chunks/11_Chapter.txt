@@ -1,0 +1,1 @@
+Challenge: Google Voice does not provide an official public API for SMS

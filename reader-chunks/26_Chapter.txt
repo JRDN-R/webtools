@@ -1,0 +1,1 @@
+Loads a SentenceTransformer model (here all-MiniLM-L6-v2, a lightweight embedding model) to embed text for semantic search. We create a simple knowledge base of family members with a brief description of each. We embed each info text and store the embeddings.

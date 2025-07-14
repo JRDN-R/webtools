@@ -1,0 +1,1 @@
+We create a Chrome/Firefox WebExtension that runs a content script on the Google Voice web app (e.g., https://voice.google.com) to detect incoming messages and trigger our AI pipeline.

@@ -1,0 +1,1 @@
+Authenticate cloudflared with your Cloudflare account (cloudflared login).

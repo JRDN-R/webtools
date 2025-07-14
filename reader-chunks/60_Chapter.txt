@@ -1,0 +1,1 @@
+Authentication: Google Voice is tied to your Google Account, but since we’re interacting with it via the logged-in web session, the extension leverages your existing login. No Google API tokens are used (and indeed Google Voice has no official API)

@@ -1,0 +1,1 @@
+Loads the Hugging Face DistilGPT2 model using the Transformers pipeline. DistilGPT2 is a smaller, distilled version of GPT-2 that is faster to run locally

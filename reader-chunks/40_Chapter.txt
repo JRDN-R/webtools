@@ -1,0 +1,1 @@
+To allow the browser extension (which runs on your local machine with Google Voice open) to reach the Flask server, we can use Cloudflare Tunnel. Cloudflare Tunnel (formerly Argo Tunnel) lets you expose a local server to the internet securely without opening ports

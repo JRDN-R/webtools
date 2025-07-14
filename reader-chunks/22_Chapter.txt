@@ -1,0 +1,1 @@
+Initializes Flask and Flask-SocketIO to handle WebSocket connections. CORS is allowed for all origins for simplicity (in production, you might restrict to your domain).

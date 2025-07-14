@@ -1,0 +1,1 @@
+Load the extension: Install the browser extension in your browser (in Chrome, enable Developer Mode and Load unpacked extension pointing to your extension folder with the manifest). Navigate to Google Voice (https://voice.google.com) and open the family group SMS thread.

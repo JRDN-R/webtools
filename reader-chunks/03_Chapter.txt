@@ -1,0 +1,1 @@
+In this guide, we will build a system that connects Google Voice SMS with OpenAI's o3 (via API) to automatically generate witty, sarcastic replies in a family group chat. The system architecture involves several components working together in real-time:

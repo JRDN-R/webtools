@@ -1,0 +1,1 @@
+Sets up the OpenAI API key (make sure to secure your key, e.g., load from environment variable instead of hardcoding).

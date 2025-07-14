@@ -1,0 +1,1 @@
+We double-check the trigger condition (ensuring the text contains gpt or ai – the extension already filters this, but this is a safeguard).

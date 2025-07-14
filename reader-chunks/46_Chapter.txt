@@ -1,0 +1,1 @@
+This will connect and provide a public URL (your custom domain or a generated one) that maps to your local Flask server. The WebSocket traffic will be forwarded to Flask just like HTTP.

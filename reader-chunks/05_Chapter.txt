@@ -1,0 +1,1 @@
+WebSocket Connection: The extension sends the message data via a WebSocket to a backend server for processing.
